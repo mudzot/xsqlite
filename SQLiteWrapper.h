@@ -311,6 +311,10 @@ public:
 	SQLiteDatabase():
 	_dbConn(NULL)
 	{}
+	virtual ~SQLiteDatabase()
+	{
+		close();
+	}
 	///Open a database
 	int open(const std::string& name) {
 		int rc = sqlite3_open(name.c_str(), &_dbConn);
@@ -326,6 +330,13 @@ public:
 			std::cerr << "[" << __FILE__ << ":" << __LINE__ << "]" << sqlite3_errmsg(_dbConn) << std::endl;;
 		}
 		return rc;
+	}
+	///Close a database
+	void close() {
+		if (_dbConn) {
+			sqlite3_close(_dbConn);
+			_dbConn = NULL;
+		}
 	}
 	///Prepare a statement (allocated with new, need delete when done)
 	SQLiteStatement* prepareStatement(const std::string& sql)
