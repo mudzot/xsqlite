@@ -1,6 +1,6 @@
 /*
 The MIT License (MIT)
- 
+
 Copyright (c) 2013 mudzot
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -33,18 +33,19 @@ THE SOFTWARE.
 #ifdef __cplusplus
 extern "C" {
 #endif
-	
+
 /**
  * Encryption support for sqlite using the high level codec interface
  * This implementation uses AES 128 bit in OFB mode
  */
-	
+
 #define BLOCKSIZE 16
 
 /**
  * The OFB cipher context
  */
-typedef struct {
+typedef struct
+{
     uint8_t orgIV[BLOCKSIZE];
     symmetric_OFB ofb;
 } OFBCipherContext;
@@ -58,10 +59,11 @@ typedef OFBCipherContext SQLiteCipherContext;
  * @param out
  * @param size
  */
-void SQLiteEncrypt(SQLiteCipherContext* ctx, const char* in, char* out, int size)
+void SQLiteEncrypt(SQLiteCipherContext *ctx, const char *in, char *out,
+                   int size)
 {
-	ofb_setiv(ctx->orgIV, BLOCKSIZE, &ctx->ofb);
-	ofb_encrypt(in, out, size, &ctx->ofb);
+    ofb_setiv(ctx->orgIV, BLOCKSIZE, &ctx->ofb);
+    ofb_encrypt(in, out, size, &ctx->ofb);
 }
 
 /**
@@ -71,21 +73,23 @@ void SQLiteEncrypt(SQLiteCipherContext* ctx, const char* in, char* out, int size
  * @param out
  * @param size
  */
-void SQLiteDecrypt(SQLiteCipherContext* ctx, const char* in, char* out, int size)
+void SQLiteDecrypt(SQLiteCipherContext *ctx, const char *in, char *out,
+                   int size)
 {
-	ofb_setiv(ctx->orgIV, BLOCKSIZE, &ctx->ofb);
-	ofb_decrypt(in, out, size, &ctx->ofb);
+    ofb_setiv(ctx->orgIV, BLOCKSIZE, &ctx->ofb);
+    ofb_decrypt(in, out, size, &ctx->ofb);
 }
 
 /**
  * Crypto block associating with each sqlite Pager
  */
-typedef struct {
-    Pager* pager;			/* Pager this crypto block belongs to */
-    int32_t pageSize;		/* Size of pages */
-    SQLiteCipherContext* readCtx;	/* CipherContext for reading */
-    SQLiteCipherContext* writeCtx;	/* CipherContext for writing */
-	uint8_t* cryptBuffer;	/* Buffer for encrypted and/or decrypted data */
+typedef struct
+{
+    Pager *pager;                  /* Pager this crypto block belongs to */
+    int32_t pageSize;              /* Size of pages */
+    SQLiteCipherContext *readCtx;  /* CipherContext for reading */
+    SQLiteCipherContext *writeCtx; /* CipherContext for writing */
+    uint8_t *cryptBuffer; /* Buffer for encrypted and/or decrypted data */
 } CodecCryptBlock;
 
 static uint8_t __cipher_registered = 0;
@@ -96,14 +100,15 @@ static uint8_t __cipher_registered = 0;
  * The context should be freed with sqlite3_free when done
  * @param passPhrase
  * @param length
- * @return 
+ * @return
  */
-SQLiteCipherContext* CipherContextNew(const uint8_t* passPhrase, int length) 
+SQLiteCipherContext *CipherContextNew(const uint8_t *passPhrase, int length)
 {
     static char salt[] = "ab$0lute";
     hash_state hashState;
-    uint8_t ivkey[BLOCKSIZE * 2];    
-    SQLiteCipherContext* ctx = (SQLiteCipherContext*)sqlite3_malloc(sizeof(SQLiteCipherContext));
+    uint8_t ivkey[BLOCKSIZE * 2];
+    SQLiteCipherContext *ctx =
+        (SQLiteCipherContext *)sqlite3_malloc(sizeof(SQLiteCipherContext));
     if (ctx == NULL) {
         return NULL;
     }
@@ -111,12 +116,13 @@ SQLiteCipherContext* CipherContextNew(const uint8_t* passPhrase, int length)
     sha256_process(&hashState, passPhrase, length);
     sha256_process(&hashState, salt, 8);
     sha256_done(&hashState, ivkey);
-    
+
     if (__cipher_registered == 0) {
-		__cipher_registered = 1;
-		register_cipher(&aes_desc);
-	}
-    ofb_start(find_cipher("aes"), ivkey, ivkey + BLOCKSIZE, BLOCKSIZE, 0, &ctx->ofb);
+        __cipher_registered = 1;
+        register_cipher(&aes_desc);
+    }
+    ofb_start(find_cipher("aes"), ivkey, ivkey + BLOCKSIZE, BLOCKSIZE, 0,
+              &ctx->ofb);
     memcpy(ctx->orgIV, ivkey, BLOCKSIZE);
     return ctx;
 }
@@ -124,10 +130,12 @@ SQLiteCipherContext* CipherContextNew(const uint8_t* passPhrase, int length)
 /**
  * Duplicate a cipher context
  * @param org
- * @return 
+ * @return
  */
-SQLiteCipherContext* CipherContextClone(SQLiteCipherContext* org) {
-    SQLiteCipherContext* ctx = (SQLiteCipherContext*)sqlite3_malloc(sizeof(SQLiteCipherContext));
+SQLiteCipherContext *CipherContextClone(SQLiteCipherContext *org)
+{
+    SQLiteCipherContext *ctx =
+        (SQLiteCipherContext *)sqlite3_malloc(sizeof(SQLiteCipherContext));
     if (ctx != NULL) {
         memcpy(ctx, org, sizeof(SQLiteCipherContext));
     }
@@ -140,70 +148,73 @@ SQLiteCipherContext* CipherContextClone(SQLiteCipherContext* org) {
  * @param pager sqlite Pager to be associated with
  * @param pageSize current page size (to be updated if changed)
  * @param existed existing crypt block to be updated if any
- * @return 
+ * @return
  */
-CodecCryptBlock* CreateCodeCryptBlock(SQLiteCipherContext* ctx, Pager* pager, int32_t pageSize, CodecCryptBlock* existing)
+CodecCryptBlock *CreateCodeCryptBlock(SQLiteCipherContext *ctx, Pager *pager,
+                                      int32_t pageSize,
+                                      CodecCryptBlock *existing)
 {
-    CodecCryptBlock* block = 0;
+    CodecCryptBlock *block = 0;
     if (existing == NULL) {
-        block = (CodecCryptBlock*)sqlite3_malloc(sizeof(CodecCryptBlock));
+        block = (CodecCryptBlock *)sqlite3_malloc(sizeof(CodecCryptBlock));
         if (block == NULL) {
             return NULL;
         }
-		block->readCtx = ctx;
-		block->writeCtx = ctx;
-		block->cryptBuffer = NULL;
-		block->pageSize = 0;
+        block->readCtx = ctx;
+        block->writeCtx = ctx;
+        block->cryptBuffer = NULL;
+        block->pageSize = 0;
     }
     if (pageSize == -1) {
         pageSize = pager->pageSize;
     }
-    
+
     block->pager = pager;
-	if (block->pageSize != pageSize) {
-		block->pageSize = pageSize;
-		if (block->cryptBuffer) {
-			sqlite3_free(block->cryptBuffer);
-		}
-		block->cryptBuffer = sqlite3_malloc(pageSize);
-		if (block->cryptBuffer == NULL) {
-			return NULL;
-		}
-	}
-	return block;
+    if (block->pageSize != pageSize) {
+        block->pageSize = pageSize;
+        if (block->cryptBuffer) {
+            sqlite3_free(block->cryptBuffer);
+        }
+        block->cryptBuffer = sqlite3_malloc(pageSize);
+        if (block->cryptBuffer == NULL) {
+            return NULL;
+        }
+    }
+    return block;
 }
 
 /**
  * Destroy the crypto block created with CreateCodecCryptBlock
  * @param block
  */
-void FreeCodecCryptBlock(CodecCryptBlock* block) {
-	if (block->cryptBuffer) {
-		sqlite3_free(block->cryptBuffer);
-		block->cryptBuffer = NULL;
-	}
-	
+void FreeCodecCryptBlock(CodecCryptBlock *block)
+{
+    if (block->cryptBuffer) {
+        sqlite3_free(block->cryptBuffer);
+        block->cryptBuffer = NULL;
+    }
+
     /* Destroy the read key if there is one */
     if (block->readCtx) {
         sqlite3_free(block->readCtx);
     }
     if (block->writeCtx != NULL && block->writeCtx != block->readCtx) {
         sqlite3_free(block->writeCtx);
-    }    
+    }
     block->readCtx = NULL;
     block->writeCtx = NULL;
 
-	sqlite3_free(block);
+    sqlite3_free(block);
 }
 
 /**
  * Destroy crypto block callback
  * @param pv
  */
-static void SQLite3CodecFreeCallback(void* pv)
+static void SQLite3CodecFreeCallback(void *pv)
 {
-    CodecCryptBlock* block = (CodecCryptBlock*)pv;
-	FreeCodecCryptBlock(block);
+    CodecCryptBlock *block = (CodecCryptBlock *)pv;
+    FreeCodecCryptBlock(block);
 }
 
 /**
@@ -214,7 +225,7 @@ static void SQLite3CodecFreeCallback(void* pv)
  */
 void SQLite3CodecSizeChangedCallback(void *pArg, int pageSize, int reservedSize)
 {
-    CodecCryptBlock* block = (CodecCryptBlock*)pArg;
+    CodecCryptBlock *block = (CodecCryptBlock *)pArg;
     if (block->pageSize != pageSize) {
         block->pageSize = pageSize;
     }
@@ -223,107 +234,125 @@ void SQLite3CodecSizeChangedCallback(void *pArg, int pageSize, int reservedSize)
 /**
  * Encrypting or decrypting a page callback
  * to be called by CODEC1 and CODEC2 in pager.c
- * 
- * Note: 
- * Decrypting is called via CODEC1 and doesn't care about returned value (therefore need to replace input data)
- * Encrypting is called via CODEC2, taking returned value as buffer data to write (DO NOT replace input data)
+ *
+ * Note:
+ * Decrypting is called via CODEC1 and doesn't care about returned value
+ * (therefore need to replace input data)
+ * Encrypting is called via CODEC2, taking returned value as buffer data to
+ * write (DO NOT replace input data)
  * @param pArg the associated crypto block
  * @param data data to be encrypted/decrypted
  * @param nPageNum page number
  * @param nMode
- * @return 
+ * @return
  */
-void * SQLite3CodecCallback(void *pArg, void *data, Pgno nPageNum, int nMode)
+void *SQLite3CodecCallback(void *pArg, void *data, Pgno nPageNum, int nMode)
 {
-    CodecCryptBlock* block = (CodecCryptBlock*)pArg;
-    if (!block) return data;
-	char* retVal = data;
-	int32_t pageSize = block->pageSize;
+    CodecCryptBlock *block = (CodecCryptBlock *)pArg;
+    if (!block)
+        return data;
+    char *retVal = data;
+    int32_t pageSize = block->pageSize;
 
-    switch(nMode)
-    {
+    switch (nMode) {
     case 0: /* Undo a "case 7" journal file encryption */
     case 2: /* Reload a page */
     case 3: /* Load a page */
-        if (!block->readCtx) break;
-		SQLiteDecrypt(block->readCtx, data, data, pageSize);
-		break;
+        if (!block->readCtx)
+            break;
+        SQLiteDecrypt(block->readCtx, data, data, pageSize);
+        break;
     case 6: /* Encrypt a page for the main database file */
-        if (!block->writeCtx) break;
-		SQLiteEncrypt(block->writeCtx, data, block->cryptBuffer, pageSize);
+        if (!block->writeCtx)
+            break;
+        SQLiteEncrypt(block->writeCtx, data, block->cryptBuffer, pageSize);
         retVal = block->cryptBuffer;
-		break;
+        break;
     case 7: /* Encrypt a page for the journal file */
-        /* Under normal circumstances, the readkey is the same as the writekey.  However,
-        when the database is being rekeyed, the readkey is not the same as the writekey.
+        /* Under normal circumstances, the readkey is the same as the writekey.
+        However,
+        when the database is being rekeyed, the readkey is not the same as the
+        writekey.
         The rollback journal must be written using the original key for the
         database file because it is, by nature, a rollback journal.
-        Therefore, for case 7, when the rollback is being written, always encrypt using
-        the database's readkey, which is guaranteed to be the same key that was used to
+        Therefore, for case 7, when the rollback is being written, always
+        encrypt using
+        the database's readkey, which is guaranteed to be the same key that was
+        used to
         read the original data.
         */
-        if (!block->readCtx) break;
+        if (!block->readCtx)
+            break;
         SQLiteEncrypt(block->readCtx, data, block->cryptBuffer, pageSize);
         retVal = block->cryptBuffer;
-		break;
+        break;
     }
-	
+
     return retVal;
 }
 
 /**
- * Called to attach a key to a database 
+ * Called to attach a key to a database
  * in (attach.c)
  * @param db
  * @param nDb
  * @param pKey
  * @param nKeyLen
- * @return 
+ * @return
  */
 int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *pKey, int nKeyLen)
 {
     int rc = SQLITE_ERROR;
-    SQLiteCipherContext* ctx = NULL;
+    SQLiteCipherContext *ctx = NULL;
 
-    /* No key specified, could mean either use the main db's encryption or no encryption */
+    /* No key specified, could mean either use the main db's encryption or no
+     * encryption */
     if (pKey == NULL || nKeyLen == 0) {
         if (nDb == 0) {
-			/* Main database, no key specified so not encrypted */
-            return SQLITE_OK; 
-        }
-        else { 
-			/*
-			 * Attached database, use the main database's key
-             * Get the encryption block for the main database and attempt to duplicate the key
+            /* Main database, no key specified so not encrypted */
+            return SQLITE_OK;
+        } else {
+            /*
+             * Attached database, use the main database's key
+             * Get the encryption block for the main database and attempt to
+             * duplicate the key
              * for use by the attached database
              */
             Pager *pager = sqlite3BtreePager(db->aDb[0].pBt);
-            CodecCryptBlock* pBlock = (CodecCryptBlock*)sqlite3PagerGetCodec(pager);
+            CodecCryptBlock *pBlock =
+                (CodecCryptBlock *)sqlite3PagerGetCodec(pager);
 
-            if (!pBlock) return SQLITE_OK; /* Main database is not encrypted so neither will be any attached database */
-            if (!pBlock->readCtx) return SQLITE_OK; /* Not encrypted */
-            
+            if (!pBlock)
+                return SQLITE_OK; /* Main database is not encrypted so neither
+                                     will be any attached database */
+            if (!pBlock->readCtx)
+                return SQLITE_OK; /* Not encrypted */
+
             ctx = CipherContextClone(pBlock->readCtx);
             if (ctx == NULL) {
                 return SQLITE_NOMEM;
             }
         }
-    } else { /* User-supplied passphrase, so create a cryptographic key out of it */
+    } else { /* User-supplied passphrase, so create a cryptographic key out of
+                it */
         ctx = CipherContextNew(pKey, nKeyLen);
         if (ctx == NULL) {
             return SQLITE_NOMEM;
         }
     }
 
-    /* Create a new encryption block and assign the codec to the new attached database */
+    /* Create a new encryption block and assign the codec to the new attached
+     * database */
     if (ctx != NULL) {
         Pager *pager = sqlite3BtreePager(db->aDb[nDb].pBt);
-        CodecCryptBlock* block = CreateCodeCryptBlock(ctx, pager, -1, NULL);
+        CodecCryptBlock *block = CreateCodeCryptBlock(ctx, pager, -1, NULL);
         if (!block) {
             return SQLITE_NOMEM;
         }
 
-        sqlite3PagerSetCodec(pager, SQLite3CodecCallback, SQLite3CodecSizeChangedCallback, SQLite3CodecFreeCallback, block);
+        sqlite3PagerSetCodec(pager, SQLite3CodecCallback,
+                             SQLite3CodecSizeChangedCallback,
+                             SQLite3CodecFreeCallback, block);
 
         rc = SQLITE_OK;
     }
@@ -341,49 +370,48 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *pKey, int nKeyLen)
  */
 void sqlite3CodecGetKey(sqlite3 *db, int nDb, void **ppKey, int *pnKeyLen)
 {
-	Btree *pbt = db->aDb[0].pBt;
-	Pager *p = sqlite3BtreePager(pbt);
-	CodecCryptBlock* pBlock = (CodecCryptBlock*)sqlite3PagerGetCodec(p);
+    Btree *pbt = db->aDb[0].pBt;
+    Pager *p = sqlite3BtreePager(pbt);
+    CodecCryptBlock *pBlock = (CodecCryptBlock *)sqlite3PagerGetCodec(p);
 
-	if (ppKey != NULL) {
-		*ppKey = 0;
-	}
-	if (pnKeyLen != NULL && pBlock != NULL) {
-		*pnKeyLen = 1;
-	}
+    if (ppKey != NULL) {
+        *ppKey = 0;
+    }
+    if (pnKeyLen != NULL && pBlock != NULL) {
+        *pnKeyLen = 1;
+    }
 }
 
 /**
  * Deprecated. Use sqlite3_key_v2.
- * 
+ *
  * @param db
  * @param pKey
  * @param nKey
- * @return 
+ * @return
  */
-SQLITE_API int sqlite3_key(
-    sqlite3 *db,                   /* Database to be rekeyed */
-    const void *pKey, int nKey     /* The key */
-)
+SQLITE_API int sqlite3_key(sqlite3 *db, /* Database to be rekeyed */
+                           const void *pKey, int nKey /* The key */
+                           )
 {
     return sqlite3_key_v2(db, NULL, pKey, nKey);
 }
 
 /**
- * Specify the key for an encrypted database.  This routine should be called right after sqlite3_open().
- * 
+ * Specify the key for an encrypted database.  This routine should be called
+ * right after sqlite3_open().
+ *
  * The code to implement this API is not available in the public release
  * of SQLite.
  * @param db
  * @param pKey
  * @param nKey
- * @return 
+ * @return
  */
-SQLITE_API int sqlite3_key_v2(
-    sqlite3 *db,                   /* Database to be rekeyed */
-    const char *zDbName,           /* Name of the database */
-    const void *pKey, int nKey     /* The key */
-)
+SQLITE_API int sqlite3_key_v2(sqlite3 *db,         /* Database to be rekeyed */
+                              const char *zDbName, /* Name of the database */
+                              const void *pKey, int nKey /* The key */
+                              )
 {
     return sqlite3CodecAttach(db, 0, pKey, nKey);
 }
@@ -391,42 +419,43 @@ SQLITE_API int sqlite3_key_v2(
 /**
  * Deprecated. Use sqlite3_rekey_v2.
  */
-SQLITE_API int sqlite3_rekey(
-    sqlite3 *db,                   /* Database to be rekeyed */
-    const void *pKey, int nKey     /* The new key */
-)
+SQLITE_API int sqlite3_rekey(sqlite3 *db, /* Database to be rekeyed */
+                             const void *pKey, int nKey /* The new key */
+                             )
 {
     return sqlite3_rekey_v2(db, NULL, pKey, nKey);
 }
 
 /**
- * Change the key on an open database.  
- * 
- * If the current database is not encrypted, this routine will encrypt it. If pNew==0 or nNew==0, 
+ * Change the key on an open database.
+ *
+ * If the current database is not encrypted, this routine will encrypt it. If
+ * pNew==0 or nNew==0,
  * the database is decrypted.
- * 
- * The code to implement this API is not available in the public release of SQLite.
+ *
+ * The code to implement this API is not available in the public release of
+ * SQLite.
  * @param db
  * @param pKey
  * @param nKey
- * @return 
+ * @return
  */
-SQLITE_API int sqlite3_rekey_v2(
-    sqlite3 *db,                   /* Database to be rekeyed */
-    const char *zDbName,           /* Name of the database */
-    const void *pKey, int nKey     /* The new key */
-)
+SQLITE_API int sqlite3_rekey_v2(sqlite3 *db, /* Database to be rekeyed */
+                                const char *zDbName, /* Name of the database */
+                                const void *pKey, int nKey /* The new key */
+                                )
 {
     Btree *pbt = db->aDb[0].pBt;
     Pager *p = sqlite3BtreePager(pbt);
-    CodecCryptBlock* block = (CodecCryptBlock*)sqlite3PagerGetCodec(p);
-    SQLiteCipherContext* ctx = NULL;
+    CodecCryptBlock *block = (CodecCryptBlock *)sqlite3PagerGetCodec(p);
+    SQLiteCipherContext *ctx = NULL;
     int rc = SQLITE_ERROR;
 
-	ctx = CipherContextNew(pKey, nKey);
+    ctx = CipherContextNew(pKey, nKey);
 
-    /* To rekey a database, we change the writekey for the pager.  The readkey remains the same */
-	
+    /* To rekey a database, we change the writekey for the pager.  The readkey
+     * remains the same */
+
     if (block == NULL) /* Encrypt an unencrypted database */
     {
         block = CreateCodeCryptBlock(ctx, p, -1, NULL);
@@ -434,13 +463,15 @@ SQLITE_API int sqlite3_rekey_v2(
             return SQLITE_NOMEM;
 
         block->readCtx = NULL; /* Original database is not encrypted */
-        sqlite3PagerSetCodec(sqlite3BtreePager(pbt), SQLite3CodecCallback, SQLite3CodecSizeChangedCallback, SQLite3CodecFreeCallback, block);
-    } else  {
+        sqlite3PagerSetCodec(sqlite3BtreePager(pbt), SQLite3CodecCallback,
+                             SQLite3CodecSizeChangedCallback,
+                             SQLite3CodecFreeCallback, block);
+    } else {
         /* Change the writekey for an already-encrypted database */
         block->writeCtx = ctx;
     }
 
-	/* Rewrite the whole database to ensure new writekey is used */
+    /* Rewrite the whole database to ensure new writekey is used */
     sqlite3_mutex_enter(db->mutex);
 
     /* Start a transaction */
@@ -457,10 +488,11 @@ SQLITE_API int sqlite3_rekey_v2(
         sqlite3PagerPagecount(p, &count);
         nPage = (Pgno)count;
 
-        for(n = 1; n <= nPage; n ++) {
-            if (n == nSkip) continue;
+        for (n = 1; n <= nPage; n++) {
+            if (n == nSkip)
+                continue;
             rc = sqlite3PagerGet(p, n, &pPage);
-            if(!rc) {
+            if (!rc) {
                 rc = sqlite3PagerWrite(pPage);
                 sqlite3PagerUnref(pPage);
             }
@@ -471,18 +503,20 @@ SQLITE_API int sqlite3_rekey_v2(
     if (rc == SQLITE_OK) {
         rc = sqlite3BtreeCommit(pbt);
     } else {
-		/* If we failed, rollback */
+        /* If we failed, rollback */
         sqlite3BtreeRollback(pbt, SQLITE_OK);
     }
 
-    /* If we succeeded, destroy any previous read key this database used and make the readkey equal to the writekey */
+    /* If we succeeded, destroy any previous read key this database used and
+     * make the readkey equal to the writekey */
     if (rc == SQLITE_OK) {
         if (block->readCtx != NULL) {
             sqlite3_free(block->readCtx);
         }
         block->readCtx = block->writeCtx;
     }
-    /* We failed.  Destroy the new writekey (if there was one) and revert it back to the original readkey */
+    /* We failed.  Destroy the new writekey (if there was one) and revert it
+       back to the original readkey */
     else {
         if (block->writeCtx != NULL) {
             sqlite3_free(block->writeCtx);
@@ -490,13 +524,13 @@ SQLITE_API int sqlite3_rekey_v2(
         block->writeCtx = block->readCtx;
     }
 
-    /* If the readkey and writekey are both empty, there's no need for a codec on this pager anymore.  
-	 * Destroy the crypt block and remove the codec from the pager.
+    /* If the readkey and writekey are both empty, there's no need for a codec
+     * on this pager anymore.
+     * Destroy the crypt block and remove the codec from the pager.
      */
-    if (block->readCtx == NULL && block->writeCtx == NULL)
-    {
+    if (block->readCtx == NULL && block->writeCtx == NULL) {
         sqlite3PagerSetCodec(p, NULL, NULL, NULL, NULL);
-		FreeCodecCryptBlock(block);
+        FreeCodecCryptBlock(block);
     }
 
     sqlite3_mutex_leave(db->mutex);
@@ -505,18 +539,17 @@ SQLITE_API int sqlite3_rekey_v2(
 }
 
 /**
- * Specify the activation key for a SEE database.  Unless 
+ * Specify the activation key for a SEE database.  Unless
  * activated, none of the SEE routines will work.
  */
-SQLITE_API void sqlite3_activate_see(
-	const char *zPassPhrase        /* Activation phrase */
-)
+SQLITE_API void
+sqlite3_activate_see(const char *zPassPhrase /* Activation phrase */
+                     )
 {
-    
 }
 
 #ifdef __cplusplus
-}  /* end of the 'extern "C"' block */
+} /* end of the 'extern "C"' block */
 #endif
 
-#endif	/* SQLITE_HAS_CODEC */
+#endif /* SQLITE_HAS_CODEC */
