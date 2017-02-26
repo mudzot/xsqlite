@@ -26,6 +26,7 @@ THE SOFTWARE.
 #define SQLITEWRAPPER_H
 
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <sqlite3.h>
@@ -118,10 +119,18 @@ public:
     }
 
     /// Bind TEXT
+    // Caller must maintain data reference until execute is called
     int bind(int oneBasedIndex, const std::string &text)
     {
         int rc = sqlite3_bind_text(_stmt, oneBasedIndex, text.data(),
                                    text.length(), SQLITE_STATIC);
+        return rc;
+    }
+
+    int bind(int oneBasedIndex, const char *text)
+    {
+        int rc = sqlite3_bind_text(_stmt, oneBasedIndex, text, strlen(text),
+                                   SQLITE_STATIC);
         return rc;
     }
 
@@ -130,6 +139,12 @@ public:
     {
         int rc = sqlite3_bind_text16(_stmt, oneBasedIndex, text.data(),
                                      2 * text.length(), SQLITE_STATIC);
+        return rc;
+    }
+
+    int bind(int oneBasedIndex, const wchar_t * text)
+    {
+        int rc = sqlite3_bind_text16(_stmt, oneBasedIndex, text, wcslen(text), SQLITE_STATIC);
         return rc;
     }
 
