@@ -27,8 +27,9 @@ THE SOFTWARE.
 
 #ifdef SQLITE_HAS_CODEC
 
+#include "crypto/mbedtls/aes.h"
+#include "crypto/mbedtls/sha512.h"
 #include <stdint.h>
-#include <tomcrypt.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,21 +37,20 @@ extern "C" {
 
 /**
  * Encryption support for sqlite using the high level codec interface
- * This implementation uses AES 128 bit in OFB mode
+ * This implementation uses AES 128 bit in CBC mode
  */
 
 #define BLOCKSIZE 16
 
 /**
- * The OFB cipher context
+ * The CBC cipher context
  */
 typedef struct
 {
     uint8_t orgIV[BLOCKSIZE];
-    symmetric_OFB ofb;
-} OFBCipherContext;
-
-typedef OFBCipherContext SQLiteCipherContext;
+    mbedtls_aes_context encrypt;
+    mbedtls_aes_context decrypt;
+} SQLiteCipherContext;
 
 /**
  * Data encryption
@@ -62,8 +62,9 @@ typedef OFBCipherContext SQLiteCipherContext;
 void SQLiteEncrypt(SQLiteCipherContext *ctx, const char *in, char *out,
                    int size)
 {
-    ofb_setiv(ctx->orgIV, BLOCKSIZE, &ctx->ofb);
-    ofb_encrypt(in, out, size, &ctx->ofb);
+    uint8_t iv[BLOCKSIZE];
+    memcpy(iv, ctx->orgIV, BLOCKSIZE);
+    mbedtls_aes_crypt_cbc(&ctx->encrypt, 1, size, iv, in, out);
 }
 
 /**
@@ -76,8 +77,9 @@ void SQLiteEncrypt(SQLiteCipherContext *ctx, const char *in, char *out,
 void SQLiteDecrypt(SQLiteCipherContext *ctx, const char *in, char *out,
                    int size)
 {
-    ofb_setiv(ctx->orgIV, BLOCKSIZE, &ctx->ofb);
-    ofb_decrypt(in, out, size, &ctx->ofb);
+    uint8_t iv[BLOCKSIZE];
+    memcpy(iv, ctx->orgIV, BLOCKSIZE);
+    mbedtls_aes_crypt_cbc(&ctx->decrypt, 0, size, iv, in, out);
 }
 
 /**
@@ -92,8 +94,6 @@ typedef struct
     uint8_t *cryptBuffer; /* Buffer for encrypted and/or decrypted data */
 } CodecCryptBlock;
 
-static uint8_t __cipher_registered = 0;
-
 /**
  * Create new cipher context
  * Key and IV are derived from the pass phrase using SHA256
@@ -104,26 +104,28 @@ static uint8_t __cipher_registered = 0;
  */
 SQLiteCipherContext *CipherContextNew(const uint8_t *passPhrase, int length)
 {
-    static char salt[] = "ab$0lute";
-    hash_state hashState;
-    uint8_t ivkey[BLOCKSIZE * 2];
+    static char salt[] = "ab$0lutelydistingu1sh";
+    uint8_t ivkey[64];
     SQLiteCipherContext *ctx =
         (SQLiteCipherContext *)sqlite3_malloc(sizeof(SQLiteCipherContext));
     if (ctx == NULL) {
         return NULL;
     }
-    sha256_init(&hashState);
-    sha256_process(&hashState, passPhrase, length);
-    sha256_process(&hashState, salt, 8);
-    sha256_done(&hashState, ivkey);
 
-    if (__cipher_registered == 0) {
-        __cipher_registered = 1;
-        register_cipher(&aes_desc);
-    }
-    ofb_start(find_cipher("aes"), ivkey, ivkey + BLOCKSIZE, BLOCKSIZE, 0,
-              &ctx->ofb);
+    mbedtls_sha512_context hashCtx;
+    mbedtls_sha512_init(&hashCtx);
+    mbedtls_sha512_starts(&hashCtx, 0);
+    mbedtls_sha512_update(&hashCtx, passPhrase, length);
+    mbedtls_sha512_update(&hashCtx, salt, strlen(salt));
+    mbedtls_sha512_finish(&hashCtx, ivkey);
+
+    mbedtls_aes_init(&ctx->encrypt);
+    mbedtls_aes_setkey_enc(&ctx->encrypt, ivkey + BLOCKSIZE, BLOCKSIZE << 3);
+    mbedtls_aes_init(&ctx->decrypt);
+    mbedtls_aes_setkey_dec(&ctx->decrypt, ivkey + BLOCKSIZE, BLOCKSIZE << 3);
+
     memcpy(ctx->orgIV, ivkey, BLOCKSIZE);
+
     return ctx;
 }
 
@@ -491,7 +493,7 @@ SQLITE_API int sqlite3_rekey_v2(sqlite3 *db, /* Database to be rekeyed */
         for (n = 1; n <= nPage; n++) {
             if (n == nSkip)
                 continue;
-            rc = sqlite3PagerGet(p, n, &pPage);
+            rc = sqlite3PagerGet(p, n, &pPage, 0);
             if (!rc) {
                 rc = sqlite3PagerWrite(pPage);
                 sqlite3PagerUnref(pPage);
@@ -504,7 +506,7 @@ SQLITE_API int sqlite3_rekey_v2(sqlite3 *db, /* Database to be rekeyed */
         rc = sqlite3BtreeCommit(pbt);
     } else {
         /* If we failed, rollback */
-        sqlite3BtreeRollback(pbt, SQLITE_OK);
+        sqlite3BtreeRollback(pbt, SQLITE_OK, 1);
     }
 
     /* If we succeeded, destroy any previous read key this database used and
