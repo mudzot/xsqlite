@@ -102,10 +102,13 @@ typedef struct
  * @param length
  * @return
  */
-SQLiteCipherContext *CipherContextNew(const uint8_t *passPhrase, int length)
+SQLiteCipherContext *CipherContextNew(const uint8_t *passphrase, int length)
 {
     static char salt[] = "ab$0lutelydistingu1sh";
     uint8_t ivkey[64];
+    if (passphrase == NULL || length <= 0) {
+        return NULL;
+    }
     SQLiteCipherContext *ctx =
         (SQLiteCipherContext *)sqlite3_malloc(sizeof(SQLiteCipherContext));
     if (ctx == NULL) {
@@ -115,7 +118,7 @@ SQLiteCipherContext *CipherContextNew(const uint8_t *passPhrase, int length)
     mbedtls_sha512_context hashCtx;
     mbedtls_sha512_init(&hashCtx);
     mbedtls_sha512_starts(&hashCtx, 0);
-    mbedtls_sha512_update(&hashCtx, passPhrase, length);
+    mbedtls_sha512_update(&hashCtx, passphrase, length);
     mbedtls_sha512_update(&hashCtx, salt, strlen(salt));
     mbedtls_sha512_finish(&hashCtx, ivkey);
 
@@ -156,7 +159,7 @@ CodecCryptBlock *CreateCodeCryptBlock(SQLiteCipherContext *ctx, Pager *pager,
                                       int32_t pageSize,
                                       CodecCryptBlock *existing)
 {
-    CodecCryptBlock *block = 0;
+    CodecCryptBlock *block = existing;
     if (existing == NULL) {
         block = (CodecCryptBlock *)sqlite3_malloc(sizeof(CodecCryptBlock));
         if (block == NULL) {
@@ -527,14 +530,13 @@ SQLITE_API int sqlite3_rekey_v2(sqlite3 *db, /* Database to be rekeyed */
     }
 
     /* If the readkey and writekey are both empty, there's no need for a codec
-     * on this pager anymore.
-     * Destroy the crypt block and remove the codec from the pager.
+     * on this pager anymore. Remove the codec from the pager.
+     * sqlite3PagerSetCodec calls FreeCodecCryptBlock for this block
      */
     if (block->readCtx == NULL && block->writeCtx == NULL) {
         sqlite3PagerSetCodec(p, NULL, NULL, NULL, NULL);
-        FreeCodecCryptBlock(block);
     }
-
+    
     sqlite3_mutex_leave(db->mutex);
 
     return rc;
