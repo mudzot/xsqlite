@@ -6,9 +6,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/crypto)
 
 add_library(sqlite3 SHARED
     sqlite3crypt.c
-    crypto/sha512.c
-    crypto/aes.c
-    crypto/aesni.c
+    crypto/sha1.c
+    crypto/arc4.c
 )
 target_compile_definitions(sqlite3 PRIVATE SQLITE_HAS_CODEC)
 

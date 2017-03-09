@@ -27,8 +27,8 @@ THE SOFTWARE.
 
 #ifdef SQLITE_HAS_CODEC
 
-#include "crypto/mbedtls/aes.h"
-#include "crypto/mbedtls/sha512.h"
+#include "crypto/mbedtls/arc4.h"
+#include "crypto/mbedtls/sha1.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -42,15 +42,18 @@ extern "C" {
 
 #define BLOCKSIZE 16
 
+#pragma pack(push, 1)
 /**
  * The CBC cipher context
  */
-typedef struct
+typedef union
 {
-    uint8_t orgIV[BLOCKSIZE];
-    mbedtls_aes_context encrypt;
-    mbedtls_aes_context decrypt;
+    unsigned char key[8];
+    uint64_t num;
 } SQLiteCipherContext;
+#define KEYSIZE 8
+
+#pragma pack(pop)
 
 /**
  * Data encryption
@@ -62,9 +65,12 @@ typedef struct
 void SQLiteEncrypt(SQLiteCipherContext *ctx, const char *in, char *out,
                    int size)
 {
-    uint8_t iv[BLOCKSIZE];
-    memcpy(iv, ctx->orgIV, BLOCKSIZE);
-    mbedtls_aes_crypt_cbc(&ctx->encrypt, 1, size, iv, in, out);
+    if (ctx->num) {
+        mbedtls_arc4_context cryptCtx;
+        mbedtls_arc4_init(&cryptCtx);
+        mbedtls_arc4_setup(&cryptCtx, ctx->key, KEYSIZE);
+        mbedtls_arc4_crypt(&cryptCtx, size, in, out);
+    }
 }
 
 /**
@@ -77,9 +83,7 @@ void SQLiteEncrypt(SQLiteCipherContext *ctx, const char *in, char *out,
 void SQLiteDecrypt(SQLiteCipherContext *ctx, const char *in, char *out,
                    int size)
 {
-    uint8_t iv[BLOCKSIZE];
-    memcpy(iv, ctx->orgIV, BLOCKSIZE);
-    mbedtls_aes_crypt_cbc(&ctx->decrypt, 0, size, iv, in, out);
+    SQLiteEncrypt(ctx, in, out, size);
 }
 
 /**
@@ -104,8 +108,7 @@ typedef struct
  */
 SQLiteCipherContext *CipherContextNew(const uint8_t *passphrase, int length)
 {
-    static char salt[] = "ab$0lutelydistingu1sh";
-    uint8_t ivkey[64];
+    uint8_t hash[64];
     if (passphrase == NULL || length <= 0) {
         return NULL;
     }
@@ -115,19 +118,18 @@ SQLiteCipherContext *CipherContextNew(const uint8_t *passphrase, int length)
         return NULL;
     }
 
-    mbedtls_sha512_context hashCtx;
-    mbedtls_sha512_init(&hashCtx);
-    mbedtls_sha512_starts(&hashCtx, 0);
-    mbedtls_sha512_update(&hashCtx, passphrase, length);
-    mbedtls_sha512_update(&hashCtx, salt, strlen(salt));
-    mbedtls_sha512_finish(&hashCtx, ivkey);
+    if (passphrase != NULL && length > 0) {
+        mbedtls_sha1_context hashCtx;
+        mbedtls_sha1_init(&hashCtx);
+        mbedtls_sha1_starts(&hashCtx);
+        mbedtls_sha1_update(&hashCtx, passphrase, length);
+        mbedtls_sha1_finish(&hashCtx, hash);
 
-    mbedtls_aes_init(&ctx->encrypt);
-    mbedtls_aes_setkey_enc(&ctx->encrypt, ivkey + BLOCKSIZE, BLOCKSIZE << 3);
-    mbedtls_aes_init(&ctx->decrypt);
-    mbedtls_aes_setkey_dec(&ctx->decrypt, ivkey + BLOCKSIZE, BLOCKSIZE << 3);
-
-    memcpy(ctx->orgIV, ivkey, BLOCKSIZE);
+        memset(ctx->key, 0, sizeof(ctx->key));
+        memcpy(ctx->key, hash, KEYSIZE);
+    } else {
+        ctx->num = 0;
+    }
 
     return ctx;
 }
@@ -435,8 +437,7 @@ SQLITE_API int sqlite3_rekey(sqlite3 *db, /* Database to be rekeyed */
  * Change the key on an open database.
  *
  * If the current database is not encrypted, this routine will encrypt it. If
- * pNew==0 or nNew==0,
- * the database is decrypted.
+ * pNew==0 or nNew==0, the database is decrypted.
  *
  * The code to implement this API is not available in the public release of
  * SQLite.
